@@ -92,9 +92,10 @@ async function guideSignup(body, request, env, cors) {
 
   const hello = name ? `Hi ${esc(name)},` : 'Hello,';
   const helloText = name ? `Hi ${name},` : 'Hello,';
+  // Say nothing about mailing lists unless the visitor opted in: whether they are added is the owner's decision, not this text's.
   const updatesText = updates
     ? 'You also said you are happy to hear from me now and then about getting set up. Reply "stop" at any time and I will remove you.'
-    : 'This is a one-off email. I have not added you to a mailing list.';
+    : '';
   const text =
     `${helloText}\n\nHere is the guide you asked for, attached as a PDF: ${GUIDE_TITLE}.\n\n` +
     'It walks you through getting a one-page website live on your own domain, using AI to write it. ' +
