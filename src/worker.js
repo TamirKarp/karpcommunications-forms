@@ -67,6 +67,28 @@ async function resendSend(env, payload) {
   return r.ok;
 }
 
+// Adds the person to the Resend mailing list (a segment of Shopfront guide signups, kept apart from the
+// schools list). Needs RESEND_CONTACTS_KEY (a separate secret from the sending key) and, to keep the list
+// separate, RESEND_SEGMENT_ID. Never fails the signup: the info@ notice says what happened.
+async function addToList(env, email, name) {
+  if (!env.RESEND_CONTACTS_KEY) return 'not set up yet, add by hand';
+  try {
+    const contact = { email, unsubscribed: false };
+    if (name) contact.first_name = name;
+    if (env.RESEND_SEGMENT_ID) contact.segments = [{ id: env.RESEND_SEGMENT_ID }];
+    const r = await fetch('https://api.resend.com/contacts', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.RESEND_CONTACTS_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(contact),
+    });
+    if (r.ok) return 'yes';
+    console.error('resend contact failed', r.status, await r.text());
+  } catch (e) {
+    console.error('resend contact error', e);
+  }
+  return 'FAILED, add by hand';
+}
+
 async function guideSignup(body, request, env, cors) {
   const email = String(body.email || '').trim();
   const name = String(body.name || '').trim();
@@ -128,6 +150,8 @@ async function guideSignup(body, request, env, cors) {
   await env.LEADS.put(sentKey, '1', { expirationTtl: COOLDOWN_SECONDS });
   await env.LEADS.put(dayKey, String(today + 1), { expirationTtl: 2 * COOLDOWN_SECONDS });
 
+  const listStatus = await addToList(env, email, name);
+
   // The lead record: one email to the inbox per signup, with the consent given. Best effort.
   await resendSend(env, {
     from: env.FORM_FROM || 'Karp Communications Website <forms@karpcommunications.com>',
@@ -136,6 +160,7 @@ async function guideSignup(body, request, env, cors) {
     text:
       `New guide signup from karpcommunications.com/creatives\n\nEmail: ${email}\nName: ${name || '(not given)'}\n` +
       `Agreed to the guide AND to join the mailing list (marketing, including paid services): yes\n` +
+      `Added to the Resend mailing list: ${listStatus}\n` +
       `Consent wording shown: "${CONSENT_WORDING}"\n` +
       `Time: ${new Date().toISOString()}\nGuide sent: ${GUIDE_FILENAME}\n`,
   });
