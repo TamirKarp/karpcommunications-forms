@@ -39,6 +39,9 @@ const GUIDE_FILENAME = 'Your-page-live-by-tonight.pdf';
 const GUIDE_TITLE = 'Your page, live by tonight';
 const GUIDE_FROM = 'Tamir Karp <guide@karpcommunications.com>';
 const GUIDE_REPLY_TO = 'info@karpcommunications.com';
+// Keep identical to the checkbox label on /creatives/. Stored in each signup notice as the record of what was agreed.
+const CONSENT_WORDING =
+  "Send me the free guide and add me to Tamir Karp's mailing list: tips on getting online and news of his services, including paid ones. I can unsubscribe at any time.";
 const DAILY_CAP = 35; // signups per day; each uses two of Resend's 100 free emails a day
 const COOLDOWN_SECONDS = 24 * 60 * 60;
 
@@ -68,8 +71,8 @@ async function guideSignup(body, request, env, cors) {
   const email = String(body.email || '').trim();
   const name = String(body.name || '').trim();
   const emailOk = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/.test(email) && email.length <= 254;
+  // One consent covers the guide and joining the mailing list; the form says so and the guide comes with the list.
   const consent = body.consent === true || body.consent === 'true' || body.consent === 'on';
-  const updates = body.updates === true || body.updates === 'true' || body.updates === 'on';
   if (!emailOk || !consent || name.length > 120) return reply(400, { ok: false, error: 'invalid' }, cors);
 
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
@@ -92,16 +95,15 @@ async function guideSignup(body, request, env, cors) {
 
   const hello = name ? `Hi ${esc(name)},` : 'Hello,';
   const helloText = name ? `Hi ${name},` : 'Hello,';
-  // Say nothing about mailing lists unless the visitor opted in: whether they are added is the owner's decision, not this text's.
-  const updatesText = updates
-    ? 'You also said you are happy to hear from me now and then about getting set up. Reply "stop" at any time and I will remove you.'
-    : '';
+  const listText =
+    'I will email you now and then about getting online and about my services, including paid ones. ' +
+    'Reply "stop" at any time and I will remove you.';
   const text =
     `${helloText}\n\nHere is the guide you asked for, attached as a PDF: ${GUIDE_TITLE}.\n\n` +
     'It walks you through getting a one-page website live on your own domain, using AI to write it. ' +
     'Allow three to five hours the first time. Your page can be visible on a free temporary address well before then.\n\n' +
     'If you get stuck, or want to tell me how it went, just reply to this email. It comes straight to me.\n\nTamir\n\n' +
-    `--\nYou are getting this because you asked for the guide at karpcommunications.com/creatives. ${updatesText}\n` +
+    `--\nYou are getting this because you asked for the guide at karpcommunications.com/creatives and agreed to join my mailing list. ${listText}\n` +
     'Privacy policy: https://karpcommunications.com/privacy/\n';
   const html =
     `<p>${hello}</p><p>Here is the guide you asked for, attached as a PDF: <strong>${esc(GUIDE_TITLE)}</strong>.</p>` +
@@ -109,7 +111,7 @@ async function guideSignup(body, request, env, cors) {
     'Allow three to five hours the first time. Your page can be visible on a free temporary address well before then.</p>' +
     '<p>If you get stuck, or want to tell me how it went, just reply to this email. It comes straight to me.</p><p>Tamir</p>' +
     '<p style="color:#6B7280;font-size:13px;border-top:1px solid #E5E7EB;padding-top:12px">' +
-    `You are getting this because you asked for the guide at karpcommunications.com/creatives. ${esc(updatesText)} ` +
+    `You are getting this because you asked for the guide at karpcommunications.com/creatives and agreed to join my mailing list. ${esc(listText)} ` +
     '<a href="https://karpcommunications.com/privacy/">Privacy policy</a>.</p>';
 
   const sent = await resendSend(env, {
@@ -133,7 +135,8 @@ async function guideSignup(body, request, env, cors) {
     subject: `Guide signup: ${email}`.replace(/[\r\n]+/g, ' ').slice(0, 150),
     text:
       `New guide signup from karpcommunications.com/creatives\n\nEmail: ${email}\nName: ${name || '(not given)'}\n` +
-      `Agreed to receive the guide and the privacy policy: yes\nAgreed to occasional emails about getting set up: ${updates ? 'YES' : 'no'}\n` +
+      `Agreed to the guide AND to join the mailing list (marketing, including paid services): yes\n` +
+      `Consent wording shown: "${CONSENT_WORDING}"\n` +
       `Time: ${new Date().toISOString()}\nGuide sent: ${GUIDE_FILENAME}\n`,
   });
 
