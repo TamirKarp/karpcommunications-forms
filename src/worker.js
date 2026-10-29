@@ -41,7 +41,7 @@ const GUIDE_FROM = 'Tamir Karp <guide@karpcommunications.com>';
 const GUIDE_REPLY_TO = 'info@karpcommunications.com';
 // Keep identical to the checkbox label on /creatives/. Stored in each signup notice as the record of what was agreed.
 const CONSENT_WORDING =
-  "Send me the free guide and add me to Tamir Karp's mailing list: tips on getting online and news of his services, including paid ones. I can unsubscribe at any time.";
+  "Send me the free guide and add me to Tamir Karp's mailing list. I can unsubscribe at any time.";
 const DAILY_CAP = 35; // signups per day; each uses two of Resend's 100 free emails a day
 const COOLDOWN_SECONDS = 24 * 60 * 60;
 
@@ -118,7 +118,6 @@ async function guideSignup(body, request, env, cors) {
   const hello = name ? `Hi ${esc(name)},` : 'Hello,';
   const helloText = name ? `Hi ${name},` : 'Hello,';
   const listText =
-    'I will email you now and then about getting online and about my services, including paid ones. ' +
     'Reply "stop" at any time and I will remove you.';
   const text =
     `${helloText}\n\nHere is the guide you asked for, attached as a PDF: ${GUIDE_TITLE}.\n\n` +
