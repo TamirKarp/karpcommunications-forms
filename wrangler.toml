@@ -3,6 +3,11 @@ main = "src/worker.js"
 compatibility_date = "2026-10-01"
 workers_dev = true
 
+# Private store: the guide PDF (key "guide.pdf") plus per-address and daily send counters.
+[[kv_namespaces]]
+binding = "LEADS"
+id = "86e8b0877116413baed0770dc9cd8a71"
+
 # RESEND_API_KEY is a secret, set with: npx wrangler secret put RESEND_API_KEY
 # Optional overrides (defaults are in src/worker.js):
 # [vars]

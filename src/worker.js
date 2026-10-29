@@ -30,6 +30,115 @@ function reply(status, body, cors) {
   return new Response(body === undefined ? null : JSON.stringify(body), { status, headers });
 }
 
+// ---- Free guide signup -------------------------------------------------------
+// The PDF lives in KV (key "guide.pdf"), not in the public site, so the email
+// form is the only way to get it. Swap the guide with: wrangler kv key put
+// guide.pdf --binding LEADS --remote --path <file>
+const GUIDE_KEY = 'guide.pdf';
+const GUIDE_FILENAME = 'Your-page-live-by-tonight.pdf';
+const GUIDE_TITLE = 'Your page, live by tonight';
+const GUIDE_FROM = 'Tamir Karp <guide@karpcommunications.com>';
+const GUIDE_REPLY_TO = 'info@karpcommunications.com';
+const DAILY_CAP = 35; // signups per day; each uses two of Resend's 100 free emails a day
+const COOLDOWN_SECONDS = 24 * 60 * 60;
+
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function toBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) out += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(out);
+}
+
+async function resendSend(env, payload) {
+  const r = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) console.error('resend failed', r.status, await r.text());
+  return r.ok;
+}
+
+async function guideSignup(body, request, env, cors) {
+  const email = String(body.email || '').trim();
+  const name = String(body.name || '').trim();
+  const emailOk = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/.test(email) && email.length <= 254;
+  const consent = body.consent === true || body.consent === 'true' || body.consent === 'on';
+  const updates = body.updates === true || body.updates === 'true' || body.updates === 'on';
+  if (!emailOk || !consent || name.length > 120) return reply(400, { ok: false, error: 'invalid' }, cors);
+
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  if (limited(ip)) return reply(429, { ok: false, error: 'rate' }, cors);
+  if (!env.RESEND_API_KEY || !env.LEADS) return reply(500, { ok: false, error: 'config' }, cors);
+
+  // Same address within a day: say yes but send nothing, so the form cannot be used to flood one inbox.
+  const sentKey = 'sent:' + (await sha256Hex(email.toLowerCase()));
+  if (await env.LEADS.get(sentKey)) return reply(200, { ok: true }, cors);
+
+  const dayKey = 'day:' + new Date().toISOString().slice(0, 10);
+  const today = parseInt((await env.LEADS.get(dayKey)) || '0', 10);
+  if (today >= DAILY_CAP) return reply(429, { ok: false, error: 'busy' }, cors);
+
+  const pdf = await env.LEADS.get(GUIDE_KEY, 'arrayBuffer');
+  if (!pdf) {
+    console.error('guide pdf missing from KV');
+    return reply(500, { ok: false, error: 'config' }, cors);
+  }
+
+  const hello = name ? `Hi ${esc(name)},` : 'Hello,';
+  const helloText = name ? `Hi ${name},` : 'Hello,';
+  const updatesText = updates
+    ? 'You also said you are happy to hear from me now and then about getting set up. Reply "stop" at any time and I will remove you.'
+    : 'This is a one-off email. I have not added you to a mailing list.';
+  const text =
+    `${helloText}\n\nHere is the guide you asked for, attached as a PDF: ${GUIDE_TITLE}.\n\n` +
+    'It walks you through getting a one-page website live on your own domain, using AI to write it. ' +
+    'Allow three to five hours the first time. Your page can be visible on a free temporary address well before then.\n\n' +
+    'If you get stuck, or want to tell me how it went, just reply to this email. It comes straight to me.\n\nTamir\n\n' +
+    `--\nYou are getting this because you asked for the guide at karpcommunications.com/creatives. ${updatesText}\n` +
+    'Privacy policy: https://karpcommunications.com/privacy/\n';
+  const html =
+    `<p>${hello}</p><p>Here is the guide you asked for, attached as a PDF: <strong>${esc(GUIDE_TITLE)}</strong>.</p>` +
+    '<p>It walks you through getting a one-page website live on your own domain, using AI to write it. ' +
+    'Allow three to five hours the first time. Your page can be visible on a free temporary address well before then.</p>' +
+    '<p>If you get stuck, or want to tell me how it went, just reply to this email. It comes straight to me.</p><p>Tamir</p>' +
+    '<p style="color:#6B7280;font-size:13px;border-top:1px solid #E5E7EB;padding-top:12px">' +
+    `You are getting this because you asked for the guide at karpcommunications.com/creatives. ${esc(updatesText)} ` +
+    '<a href="https://karpcommunications.com/privacy/">Privacy policy</a>.</p>';
+
+  const sent = await resendSend(env, {
+    from: GUIDE_FROM,
+    to: [email],
+    reply_to: GUIDE_REPLY_TO,
+    subject: `Your guide: ${GUIDE_TITLE}`,
+    text,
+    html,
+    attachments: [{ filename: GUIDE_FILENAME, content: toBase64(pdf) }],
+  });
+  if (!sent) return reply(502, { ok: false, error: 'send' }, cors);
+
+  await env.LEADS.put(sentKey, '1', { expirationTtl: COOLDOWN_SECONDS });
+  await env.LEADS.put(dayKey, String(today + 1), { expirationTtl: 2 * COOLDOWN_SECONDS });
+
+  // The lead record: one email to the inbox per signup, with the consent given. Best effort.
+  await resendSend(env, {
+    from: env.FORM_FROM || 'Karp Communications Website <forms@karpcommunications.com>',
+    to: [env.FORM_TO || 'info@karpcommunications.com'],
+    subject: `Guide signup: ${email}`.replace(/[\r\n]+/g, ' ').slice(0, 150),
+    text:
+      `New guide signup from karpcommunications.com/creatives\n\nEmail: ${email}\nName: ${name || '(not given)'}\n` +
+      `Agreed to receive the guide and the privacy policy: yes\nAgreed to occasional emails about getting set up: ${updates ? 'YES' : 'no'}\n` +
+      `Time: ${new Date().toISOString()}\nGuide sent: ${GUIDE_FILENAME}\n`,
+  });
+
+  return reply(200, { ok: true }, cors);
+}
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get('Origin');
@@ -57,6 +166,8 @@ export default {
 
     // Hidden field a person never fills in. Pretend success so bots move on.
     if (body._gotcha) return reply(200, { ok: true }, cors);
+
+    if (body.source === 'guide') return guideSignup(body, request, env, cors);
 
     const name = String(body.name || '').trim();
     const email = String(body.email || '').trim();
