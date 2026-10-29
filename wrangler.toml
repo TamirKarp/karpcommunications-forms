@@ -1,0 +1,10 @@
+name = "karpcommunications-forms"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# RESEND_API_KEY is a secret, set with: npx wrangler secret put RESEND_API_KEY
+# Optional overrides (defaults are in src/worker.js):
+# [vars]
+# FORM_TO = "info@karpcommunications.com"
+# FORM_FROM = "Karp Communications Website <forms@karpcommunications.com>"
